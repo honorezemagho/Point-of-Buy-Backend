@@ -8,7 +8,7 @@ import { MulterModule } from '@nestjs/platform-express';
     MulterModule.register({
       dest: './uploads',
       limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB max file size
+        fileSize: 20 * 1024 * 1024, // 20MB max file size
       },
     }),
   ],
