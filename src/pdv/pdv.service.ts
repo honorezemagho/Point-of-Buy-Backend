@@ -18,20 +18,25 @@ export class PdvService {
     this.db = db;
   }
 
-  private validatePdvData(row: Record<string, any>): CreatePdvDto | null {
+  private validatePdvData(row: Record<string, unknown>): CreatePdvDto | null {
     try {
       // Convert string numbers to actual numbers
       const numericFields = [
-        'PROJET_POWER_ID', 'LATITUDE', 'LONGITUDE', 
-        'STAR_TIME_OK', 'END_TIME_OK'
-      ];
-      
-      const processedData: Record<string, any> = { ...row };
-      
+        'PROJET_POWER_ID',
+        'LATITUDE',
+        'LONGITUDE',
+        'STAR_TIME_OK',
+        'END_TIME_OK',
+      ] as const;
+
+      // Create a new object with proper typing
+      const processedData = { ...row } as Record<string, unknown>;
+
       // Convert numeric fields
       for (const field of numericFields) {
-        if (field in processedData && processedData[field] !== '') {
-          processedData[field] = Number(processedData[field]);
+        const value = processedData[field];
+        if (value !== undefined && value !== null && value !== '') {
+          processedData[field] = Number(value);
         }
       }
 
@@ -39,10 +44,11 @@ export class PdvService {
       const pdv = plainToInstance(CreatePdvDto, processedData, {
         enableImplicitConversion: true,
       });
-      
+
       return pdv;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       const errorStack = error instanceof Error ? error.stack : undefined;
       this.logger.error(`Error parsing PDV data: ${errorMessage}`, errorStack);
       return null;
@@ -53,18 +59,26 @@ export class PdvService {
     try {
       const errors = await validate(pdv);
       if (errors.length > 0) {
-        const errorMessage = `Validation failed for PDV: ${JSON.stringify(pdv, null, 2)}\n` +
-          `Errors: ${JSON.stringify(errors.map(e => ({
-            property: e.property,
-            constraints: e.constraints,
-            value: e.value,
-          })), null, 2)}`;
+        const errorDetails = errors.map((e) => ({
+          property: e.property,
+          constraints: e.constraints,
+          value: e.value as unknown,
+        }));
+
+        const errorMessage = [
+          'Validation failed for PDV:',
+          JSON.stringify(pdv, null, 2),
+          'Errors:',
+          JSON.stringify(errorDetails, null, 2),
+        ].join('\n');
+
         this.logger.warn(errorMessage);
         return false;
       }
       return true;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown validation error';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown validation error';
       this.logger.error(`Error validating PDV: ${errorMessage}`);
       return false;
     }
@@ -72,12 +86,37 @@ export class PdvService {
 
   private async processBatch(batch: WriteBatch): Promise<void> {
     try {
-      await batch.commit();
+      // Check if batch has any operations before committing
+      const batchRef = batch as unknown as {
+        _mutations: unknown[];
+      };
+      if (batchRef._mutations?.length > 0) {
+        await batch.commit();
+      }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       const errorStack = error instanceof Error ? error.stack : undefined;
       this.logger.error('Error committing batch to Firestore', errorStack);
       throw new Error(`Failed to commit batch: ${errorMessage}`);
+    }
+  }
+
+  private async processRow(row: Record<string, unknown>): Promise<boolean> {
+    try {
+      const pdv = this.validatePdvData(row);
+      if (!pdv) {
+        return false;
+      }
+      return this.validatePdv(pdv);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error('Error processing row', {
+        error: errorMessage,
+        row: JSON.stringify(row, null, 2),
+      });
+      return false;
     }
   }
 
@@ -90,97 +129,123 @@ export class PdvService {
 
     let processedCount = 0;
     let errorCount = 0;
-    let batch = this.db.batch();
     const collectionRef = this.db.collection(this.collection);
     const csvContent = file.buffer.toString('utf-8');
+    const batchPromises: Promise<void>[] = [];
 
     try {
       await new Promise<void>((resolve, reject) => {
         const stream = Readable.from(csvContent);
-        let batchPromises: Promise<void>[] = [];
+        let currentBatchSize = 0;
+        let currentBatch = this.db.batch();
+        let isProcessing = false;
 
-        const processRow = async (row: Record<string, any>) => {
+        const processBatch = this.processBatch.bind(this);
+
+        const processRow = async (row: Record<string, unknown>) => {
           try {
-            const pdv = this.validatePdvData(row);
-            if (!pdv) {
-              errorCount++;
-              return;
-            }
-
-            const isValid = await this.validatePdv(pdv);
+            const isValid = await this.processRow(row);
             if (!isValid) {
               errorCount++;
               return;
             }
 
-            // Use UNIQUE_ID as the document ID
-            const docRef = collectionRef.doc(pdv.UNIQUE_ID);
-            batch.set(docRef, pdv);
-            processedCount++;
+            const pdv = this.validatePdvData(row);
+            if (pdv) {
+              const docRef = collectionRef.doc(pdv.UNIQUE_ID);
+              currentBatch.set(docRef, pdv);
+              processedCount++;
+              currentBatchSize++;
 
-            // Commit batch when reaching batch size
-            if (processedCount % this.BATCH_SIZE === 0) {
-              const currentBatch = batch;
-              batch = this.db.batch();
-              batchPromises.push(this.processBatch(currentBatch));
-              this.logger.log(`Processed ${processedCount} records...`);
+              // Commit batch when reaching batch size
+              if (currentBatchSize >= this.BATCH_SIZE) {
+                const batchToProcess = currentBatch;
+                currentBatch = this.db.batch();
+                currentBatchSize = 0;
+
+                const batchPromise = processBatch(batchToProcess);
+                batchPromises.push(batchPromise);
+                await batchPromise; // Wait for this batch to complete before continuing
+              }
             }
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            this.logger.error(`Error processing row: ${JSON.stringify(row, null, 2)}. Error: ${errorMessage}`);
             errorCount++;
+            const errorMessage =
+              error instanceof Error ? error.message : 'Unknown error';
+            this.logger.error('Error processing row', {
+              error: errorMessage,
+              row: JSON.stringify(row, null, 2),
+            });
           }
         };
 
-        const csvStream = csv.parse({ 
-          headers: true,
-          trim: true,
-          strictColumnHandling: true,
-        });
+        const processEnd = async (): Promise<void> => {
+          if (isProcessing) return;
+          isProcessing = true;
 
-        csvStream
-          .on('error', (error) => {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown CSV error';
+          try {
+            // Process any remaining items in the current batch
+            if (currentBatchSize > 0) {
+              await processBatch(currentBatch);
+            }
+
+            // Wait for all batch operations to complete
+            await Promise.all(batchPromises);
+
+            const successRate =
+              processedCount > 0
+                ? Math.round(
+                    ((processedCount - errorCount) / processedCount) * 100,
+                  )
+                : 0;
+
+            this.logger.log(
+              `Successfully processed ${processedCount} PDV records ` +
+                `with ${errorCount} errors (${successRate}% success)`,
+            );
+
+            resolve();
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : 'Unknown error';
+            this.logger.error('Error in CSV processing completion', {
+              error: errorMessage,
+            });
+            reject(new Error(`CSV processing failed: ${errorMessage}`));
+          }
+        };
+
+        csv
+          .parse({ headers: true, delimiter: ';' })
+          .on('error', (error: unknown) => {
+            const errorMessage =
+              error instanceof Error ? error.message : 'Unknown error';
             this.logger.error('CSV parsing error', { error: errorMessage });
             reject(new Error(`CSV parsing failed: ${errorMessage}`));
           })
-          .on('data', (row) => {
+          .on('data', (row: Record<string, unknown>) => {
             // Queue row processing but don't await here
-            processRow(row).catch((error) => {
-              this.logger.error('Error in row processing', { error });
-              errorCount++;
+            processRow(row).catch(() => {
+              // Errors are already handled in processRow
             });
           })
-          .on('end', async () => {
-            try {
-              // Wait for all batch operations to complete
-              await Promise.allSettled(batchPromises);
-              
-              // Commit any remaining operations in the last batch
-              if (processedCount % this.BATCH_SIZE !== 0) {
-                await this.processBatch(batch);
-              }
-              
-              resolve();
-            } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-              this.logger.error('Error in CSV processing completion', { error: errorMessage });
-              reject(new Error(`CSV processing failed: ${errorMessage}`));
-            }
+          .on('end', () => {
+            // Handle end event
+            processEnd().catch(reject);
           });
 
         // Start the stream
-        stream.pipe(csvStream);
+        stream.pipe(csv.parse({ headers: true, delimiter: ';' }));
       });
 
-      this.logger.log(`Successfully processed ${processedCount} PDV records with ${errorCount} errors`);
-      return { 
-        message: 'CSV processing completed', 
-        processed: processedCount, 
+      return {
+        message: 'CSV processing completed',
+        processed: processedCount,
         errors: errorCount,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       this.logger.error('Error processing CSV', { error: errorMessage });
       throw new Error(`Failed to process CSV: ${errorMessage}`);
     }
