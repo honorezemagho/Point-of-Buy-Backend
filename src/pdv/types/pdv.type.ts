@@ -6,7 +6,7 @@ import {
   ChainStatus,
 } from '../enums/pdv.enum';
 
-export type CreatePdvDtoType = {
+export type GetPdvType = {
   PROJET_POWER_ID: number;
   UNIQUE_ID: string;
   REGION: string;

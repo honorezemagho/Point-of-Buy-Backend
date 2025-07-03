@@ -1,42 +1,36 @@
 import {
   IsString,
   IsNumber,
-  IsUUID,
   IsOptional,
-  IsEnum,
   Matches,
-  Min,
-  Max,
   IsNotEmpty,
 } from 'class-validator';
-import { PdvType } from '../enums/pdv.enum';
-import { ZoneType } from '../enums/pdv.enum';
-import { BusinessAge } from '../enums/pdv.enum';
-import { RespondentRole } from '../enums/pdv.enum';
-import { ChainStatus } from '../enums/pdv.enum';
 
 export class CreatePdvDto {
   @IsNumber()
   @IsOptional()
   PROJET_POWER_ID?: number;
 
-  @IsUUID('4')
-  @IsNotEmpty()
-  UNIQUE_ID!: string;
+  @IsOptional()
+  @IsString()
+  UNIQUE_ID?: string;
 
   @IsString()
-  @IsNotEmpty()
-  REGION!: string;
+  @IsOptional()
+  REGION?: string;
 
   @IsString()
+  @IsOptional()
   @IsNotEmpty()
   VILLE!: string;
 
   @IsString()
+  @IsOptional()
   @IsNotEmpty()
   ARRONDISSEMENT!: string;
 
   @IsString()
+  @IsOptional()
   @IsNotEmpty()
   QUARTIER!: string;
 
@@ -45,36 +39,36 @@ export class CreatePdvDto {
   QUARTIER_AUTRES?: string;
 
   @IsString()
-  @IsNotEmpty()
-  ENQUETEUR!: string;
+  @IsOptional()
+  ENQUETEUR?: string;
 
   @IsString()
-  @IsNotEmpty()
-  SUPERVISEUR!: string;
-
-  @IsEnum(PdvType)
-  @IsNotEmpty()
-  TYPE_PDV!: PdvType;
+  @IsOptional()
+  SUPERVISEUR?: string;
 
   @IsString()
-  @IsNotEmpty()
-  TYPE_QUESTIONNAIRE!: string;
+  @IsOptional()
+  TYPE_PDV?: string;
 
-  @IsEnum(ZoneType)
-  @IsNotEmpty()
-  ZONE_D_ENQUETE!: ZoneType;
+  @IsString()
+  @IsOptional()
+  TYPE_QUESTIONNAIRE?: string;
 
-  @IsEnum(BusinessAge)
-  @IsNotEmpty()
-  S1!: BusinessAge;
+  @IsString()
+  @IsOptional()
+  ZONE_D_ENQUETE?: string;
 
-  @IsEnum(RespondentRole)
-  @IsNotEmpty()
-  S3!: RespondentRole;
+  @IsString()
+  @IsOptional()
+  S1?: string;
 
-  @IsEnum(ChainStatus)
-  @IsNotEmpty()
-  S4!: ChainStatus;
+  @IsString()
+  @IsOptional()
+  S3?: string;
+
+  @IsString()
+  @IsOptional()
+  S4?: string;
 
   @IsString()
   @IsOptional()
@@ -121,29 +115,21 @@ export class CreatePdvDto {
 
   @IsNumber()
   @IsNotEmpty()
-  @Min(-90)
-  @Max(90)
   LATITUDE!: number;
 
   @IsNumber()
   @IsNotEmpty()
-  @Min(-180)
-  @Max(180)
   LONGITUDE!: number;
 
   @IsNumber()
   @IsOptional()
-  @Min(0)
-  @Max(1)
   STAR_TIME_OK?: number;
 
   @IsNumber()
   @IsOptional()
-  @Min(0)
-  @Max(1)
   END_TIME_OK?: number;
 
   @IsString()
-  @IsNotEmpty()
-  fiche_Questionnaire!: string;
+  @IsOptional()
+  fiche_Questionnaire?: string;
 }

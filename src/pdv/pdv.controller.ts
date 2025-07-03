@@ -71,8 +71,6 @@ export class PdvController {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { message, ...result } = await this.pdvService.processCsv({
         buffer: file.buffer,
-        originalname: file.originalname,
-        mimetype: file.mimetype,
       });
 
       return {
@@ -153,8 +151,6 @@ export class PdvController {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { message, ...result } = await this.pdvService.processExcel({
         buffer: file.buffer,
-        originalname: file.originalname,
-        mimetype: file.mimetype,
       });
 
       return {
