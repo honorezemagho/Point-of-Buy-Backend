@@ -1,15 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { db } from '../firebase.config';
-import * as csv from 'fast-csv';
-import { CreatePdvDto } from './dto/create-pdv.dto';
-import { Firestore, WriteBatch } from 'firebase-admin/firestore';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
+import * as csv from 'fast-csv';
+import * as XLSX from 'xlsx';
+import { CreatePdvDto } from './dto/create-pdv.dto';
+import { db } from '../firebase.config';
+import { Firestore, WriteBatch } from 'firebase-admin/firestore';
 
 @Injectable()
 export class PdvService {
   private readonly logger = new Logger(PdvService.name);
-  private readonly collection = 'pdv';
+  private readonly collection = 'pdvs';
   private readonly BATCH_SIZE = 500;
   private readonly db: Firestore;
 
@@ -121,28 +122,179 @@ export class PdvService {
     }
   }
 
-  private async processRow(row: Record<string, unknown>): Promise<boolean> {
-    try {
-      const pdv = this.validatePdvData(row);
-      if (!pdv) {
-        return false;
+  /**
+   * Process array of records and import to Firestore
+   * @param records Array of record objects
+   * @returns Processing results
+   */
+  private async processRecords(
+    records: Array<Record<string, unknown>>,
+  ): Promise<{ message: string; processed: number; errors: number }> {
+    let processedCount = 0;
+    let errorCount = 0;
+    const processedIds = new Set<string>();
+    let currentBatch = this.db.batch();
+    let currentBatchSize = 0;
+    const collectionRef = this.db.collection(this.collection);
+
+    for (const row of records) {
+      try {
+        const pdv = this.validatePdvData(row);
+        if (!pdv) {
+          errorCount++;
+          continue;
+        }
+
+        // Ensure UNIQUE_ID is present and valid for Firestore
+        if (!pdv.UNIQUE_ID || !this.isValidFirestoreId(pdv.UNIQUE_ID)) {
+          this.logger.warn(
+            `Skipping row with invalid UNIQUE_ID: ${JSON.stringify(
+              pdv.UNIQUE_ID,
+            )}. ID must be a non-empty string and valid for Firestore.`,
+          );
+          errorCount++;
+          continue;
+        }
+
+        // Skip duplicates in the current batch
+        if (processedIds.has(pdv.UNIQUE_ID)) {
+          this.logger.warn(`Skipping duplicate UNIQUE_ID: ${pdv.UNIQUE_ID}`);
+          errorCount++;
+          continue;
+        }
+
+        // Convert DTO to plain object and handle numeric fields
+        const pdvData = this.preparePdvData(pdv);
+        if (!pdvData) {
+          errorCount++;
+          continue;
+        }
+
+        // Add to batch
+        const docRef = collectionRef.doc(pdv.UNIQUE_ID);
+        currentBatch.set(docRef, pdvData, { merge: true });
+        processedIds.add(pdv.UNIQUE_ID);
+        currentBatchSize++;
+        processedCount++;
+
+        // Commit batch if size limit reached
+        if (currentBatchSize >= this.BATCH_SIZE) {
+          await this.processBatch(currentBatch);
+          currentBatch = this.db.batch();
+          currentBatchSize = 0;
+        }
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          this.logger.error(
+            `Error processing row: ${error.message}`,
+            error.stack,
+          );
+        } else {
+          const errorMessage = String(error);
+          this.logger.error(`Error processing row: ${errorMessage}`);
+        }
+        errorCount++;
       }
-      return this.validatePdv(pdv);
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error('Error processing row', {
-        error: errorMessage,
-        row: JSON.stringify(row, null, 2),
-      });
-      return false;
     }
+
+    // Commit any remaining operations in the last batch
+    if (currentBatchSize > 0) {
+      await this.processBatch(currentBatch);
+    }
+
+    return {
+      message: `Processed ${processedCount} records with ${errorCount} errors`,
+      processed: processedCount,
+      errors: errorCount,
+    };
+  }
+
+  /**
+   * Prepare PDV data for Firestore
+   */
+  private preparePdvData(pdv: CreatePdvDto): Record<string, unknown> | null {
+    const pdvData = { ...pdv } as Record<string, unknown>;
+
+    // Convert numeric fields, making PROJET_POWER_ID optional
+    const numericFields = [
+      { field: 'LATITUDE', required: false },
+      { field: 'LONGITUDE', required: false },
+      { field: 'STAR_TIME_OK', required: false },
+      { field: 'END_TIME_OK', required: false },
+      { field: 'DATE', required: false },
+      { field: 'TELEPHONE_DU_REPONDANT', required: false },
+      { field: 'TELEPHONE_ENTREPRISE', required: false },
+      { field: 'PROJET_POWER_ID', required: false },
+    ];
+
+    for (const { field, required } of numericFields) {
+      const value = pdvData[field];
+      if (value === undefined || value === '') {
+        if (required) {
+          this.logger.warn(`Missing required numeric field: ${field}`);
+          return null;
+        }
+        // Set to null for optional fields
+        pdvData[field] = null;
+      } else {
+        const numValue = Number(value);
+        if (isNaN(numValue)) {
+          if (required) {
+            this.logger.warn(`Invalid number format for field: ${field}`);
+            return null;
+          }
+          // For optional fields, keep the original value if conversion fails
+          pdvData[field] = value;
+        } else {
+          pdvData[field] = numValue;
+        }
+      }
+    }
+
+    return pdvData;
   }
 
   /**
    * Process a CSV file from buffer
    * @param file - The uploaded file object containing the buffer
    * @returns Object containing processing results
+   */
+  /**
+   * Process Excel file and import data to Firestore
+   * @param file Excel file buffer
+   * @returns Processing results
+   */
+  async processExcel(file: {
+    buffer: Buffer;
+    originalname: string;
+    mimetype: string;
+  }): Promise<{ message: string; processed: number; errors: number }> {
+    const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+    const firstSheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[firstSheetName];
+
+    // Convert to array of objects
+    const allRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+      worksheet,
+      {
+        raw: false,
+        defval: '',
+      },
+    );
+
+    // Limit to first 10 records for Excel files
+    const limitedRows = allRows.slice(0, 10);
+    this.logger.log(
+      `Processing ${limitedRows.length} records from Excel file (limited to 10)`,
+    );
+
+    return this.processRecords(limitedRows);
+  }
+
+  /**
+   * Process CSV file and import data to Firestore
+   * @param file CSV file buffer
+   * @returns Processing results
    */
   async processCsv(file: {
     buffer: Buffer;
@@ -198,15 +350,15 @@ export class PdvService {
         });
 
         // Counter for processed records
-        // let processedRows = 0;
-        // const MAX_RECORDS = 10;
+        let processedRows = 0;
+        const MAX_RECORDS = 10;
 
         // Process a single row of data
         const processRow = (row: Record<string, unknown>) => {
           // Stop processing after MAX_RECORDS
-          // if (processedRows >= MAX_RECORDS) {
-          //   return;
-          // }
+          if (processedRows >= MAX_RECORDS) {
+            return;
+          }
           try {
             const pdv = this.validatePdvData(row);
             if (!pdv) {
@@ -279,12 +431,12 @@ export class PdvService {
             processedIds.add(pdv.UNIQUE_ID);
             currentBatchSize++;
             processedCount++;
-            // processedRows++;
+            processedRows++;
 
-            // // Stop processing after MAX_RECORDS
-            // if (processedRows >= MAX_RECORDS) {
-            //   this.logger.log(`Processed maximum of ${MAX_RECORDS} records`);
-            // }
+            // Stop processing after MAX_RECORDS
+            if (processedRows >= MAX_RECORDS) {
+              this.logger.log(`Processed maximum of ${MAX_RECORDS} records`);
+            }
 
             // Commit batch if size limit reached
             if (currentBatchSize >= this.BATCH_SIZE) {
