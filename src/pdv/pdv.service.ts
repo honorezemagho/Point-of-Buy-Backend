@@ -30,7 +30,6 @@ export class PdvService {
       Object.keys(row).forEach((key) => {
         if (row[key] === '') row[key] = null;
       });
-
       return plainToInstance(CreatePdvDto, row, {
         enableImplicitConversion: true,
       });
@@ -71,7 +70,6 @@ export class PdvService {
 
   private preparePdvData(pdv: CreatePdvDto): Record<string, unknown> {
     const pdvData = { ...pdv } as Record<string, unknown>;
-
     for (const field of this.numericFields) {
       const value = pdvData[field];
       if (value === undefined || value === '') {
@@ -81,7 +79,6 @@ export class PdvService {
         pdvData[field] = isNaN(numValue) ? value : numValue;
       }
     }
-
     return pdvData;
   }
 
@@ -100,18 +97,17 @@ export class PdvService {
     }
   }
 
-  private async processRecords(
+  async processRecords(
     records: Array<Record<string, unknown>>,
   ): Promise<{ message: string; processed: number; errors: number }> {
     let processedCount = 0;
     let errorCount = 0;
-    const totalRecords = records.length;
     const processedIds = new Set<string>();
     let currentBatch = this.db.batch();
     let currentBatchSize = 0;
     const collectionRef = this.db.collection(this.collection);
 
-    this.logger.log(`Starting to process ${totalRecords} records.`);
+    this.logger.log(`Starting to process ${records.length} records.`);
 
     for (const row of records) {
       try {
@@ -166,7 +162,7 @@ export class PdvService {
     }
 
     this.logger.log(
-      `Finished processing. Total: ${totalRecords}, Processed: ${processedCount}, Errors: ${errorCount}`,
+      `Finished processing. Total: ${records.length}, Processed: ${processedCount}, Errors: ${errorCount}`,
     );
 
     return {
@@ -190,7 +186,7 @@ export class PdvService {
     });
 
     this.logger.log(`Processing ${rows.length} records from Excel`);
-    return this.processRecordsInChunks(rows);
+    return this.processRecords(rows);
   }
 
   async processCsv(file: {
@@ -200,13 +196,6 @@ export class PdvService {
       throw new Error('No CSV file provided or file is empty.');
 
     const csvString = file.buffer.toString('utf-8').replace(/\r\n/g, '\n');
-    const lines = csvString
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-
-    if (lines.length < 2)
-      throw new Error('CSV file is missing headers or data.');
 
     const records: Record<string, unknown>[] = [];
 
@@ -222,40 +211,6 @@ export class PdvService {
     });
 
     this.logger.log(`Processing ${records.length} records from CSV`);
-    return this.processRecordsInChunks(records);
-  }
-
-  private chunkArray<T>(array: T[], chunkSize: number): T[][] {
-    const chunks: T[][] = [];
-    for (let i = 0; i < array.length; i += chunkSize) {
-      chunks.push(array.slice(i, i + chunkSize));
-    }
-    return chunks;
-  }
-
-  async processRecordsInChunks(
-    records: Array<Record<string, unknown>>,
-    chunkSize = 100,
-  ): Promise<{ message: string; processed: number; errors: number }> {
-    let totalProcessed = 0;
-    let totalErrors = 0;
-    const chunks = this.chunkArray(records, chunkSize);
-
-    this.logger.log(
-      `File split into ${chunks.length} chunks of ${chunkSize} records.`,
-    );
-
-    for (let i = 0; i < chunks.length; i++) {
-      this.logger.log(`Processing chunk ${i + 1} of ${chunks.length}`);
-      const result = await this.processRecords(chunks[i]); // Reuse your existing method
-      totalProcessed += result.processed;
-      totalErrors += result.errors;
-    }
-
-    return {
-      message: `Processed ${totalProcessed} records in total with ${totalErrors} errors.`,
-      processed: totalProcessed,
-      errors: totalErrors,
-    };
+    return this.processRecords(records);
   }
 }
