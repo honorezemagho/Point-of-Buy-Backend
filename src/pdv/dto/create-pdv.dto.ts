@@ -17,8 +17,8 @@ import { ChainStatus } from '../enums/pdv.enum';
 
 export class CreatePdvDto {
   @IsNumber()
-  @IsNotEmpty()
-  PROJET_POWER_ID!: number;
+  @IsOptional()
+  PROJET_POWER_ID?: number;
 
   @IsUUID('4')
   @IsNotEmpty()

@@ -54,7 +54,9 @@ export class PdvController {
     description: 'Invalid file format or missing file',
   })
   @UseInterceptors(FileInterceptor('file'))
-  async uploadFile(@UploadedFile() file: Express.Multer.File) {
+  async uploadFile(
+    @UploadedFile() file: Express.Multer.File & { buffer: Buffer },
+  ) {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
