@@ -94,11 +94,13 @@ export class CreatePdvDto {
   @IsNotEmpty()
   LONGITUDE!: number;
 
+  @IsString()
   @IsOptional()
-  STAR_TIME_OK?: number;
+  STAR_TIME_OK?: string;
 
+  @IsString()
   @IsOptional()
-  END_TIME_OK?: number;
+  END_TIME_OK?: string;
 
   @IsString()
   @IsOptional()
