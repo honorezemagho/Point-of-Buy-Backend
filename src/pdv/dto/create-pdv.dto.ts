@@ -56,7 +56,49 @@ export class CreatePdvDto {
 
   @IsString()
   @IsOptional()
+  PRESENCE_RESTAURATION?: string;
+
+  @IsString()
+  @IsOptional()
   ZONE_D_ENQUETE?: string;
+
+  @IsString()
+  @IsOptional()
+  NOM_ENTREPRISE?: string;
+
+  @IsString()
+  @IsOptional()
+  NOM_DU_REPONDANT?: string;
+
+  @IsString()
+  @IsOptional()
+  TELEPHONE_DU_REPONDANT?: string;
+
+  @IsString()
+  @IsOptional()
+  TELEPHONE_ENTREPRISE?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  DATE!: string;
+
+  @IsString()
+  @IsOptional()
+  ADRESSE_PHYSIQUE?: string;
+
+  @IsNumber()
+  @IsNotEmpty()
+  LATITUDE!: number;
+
+  @IsNumber()
+  @IsNotEmpty()
+  LONGITUDE!: number;
+
+  @IsOptional()
+  STAR_TIME_OK?: number;
+
+  @IsOptional()
+  END_TIME_OK?: number;
 
   @IsString()
   @IsOptional()
@@ -73,63 +115,4 @@ export class CreatePdvDto {
   @IsString()
   @IsOptional()
   Q1?: string;
-
-  @IsString()
-  @IsOptional()
-  Q2?: string;
-
-  @IsString()
-  @IsOptional()
-  Q3?: string;
-
-  @IsString()
-  @IsOptional()
-  NOM_ENTREPRISE?: string;
-
-  @IsString()
-  @IsOptional()
-  NOM_DU_REPONDANT?: string;
-
-  @IsString()
-  @IsOptional()
-  @Matches(/^(?:\d{9}|Refus)?$/, {
-    message: 'TELEPHONE_DU_REPONDANT must be a 9-digit number or "Refus"',
-  })
-  TELEPHONE_DU_REPONDANT?: string;
-
-  @IsString()
-  @IsOptional()
-  @Matches(/^(?:\d{9}|Refus)?$/, {
-    message: 'TELEPHONE_ENTREPRISE must be a 9-digit number or "Refus"',
-  })
-  TELEPHONE_ENTREPRISE?: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^\d{8}$/, { message: 'DATE must be in YYYYMMDD format' })
-  DATE!: string;
-
-  @IsString()
-  @IsOptional()
-  ADRESSE_PHYSIQUE?: string;
-
-  @IsNumber()
-  @IsNotEmpty()
-  LATITUDE!: number;
-
-  @IsNumber()
-  @IsNotEmpty()
-  LONGITUDE!: number;
-
-  @IsNumber()
-  @IsOptional()
-  STAR_TIME_OK?: number;
-
-  @IsNumber()
-  @IsOptional()
-  END_TIME_OK?: number;
-
-  @IsString()
-  @IsOptional()
-  fiche_Questionnaire?: string;
 }

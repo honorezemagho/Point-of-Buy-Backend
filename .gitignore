@@ -25,6 +25,7 @@ yarn-error.log*
 
 # Firebase
 firebase-service-account.json
+firebase-service-account-backup.json
 
 # Uploads
 /uploads
