@@ -17,8 +17,6 @@ export class PdvService {
   private readonly numericFields = [
     'LATITUDE',
     'LONGITUDE',
-    'STAR_TIME_OK',
-    'END_TIME_OK',
     'DATE',
     'TELEPHONE_DU_REPONDANT',
     'TELEPHONE_ENTREPRISE',
