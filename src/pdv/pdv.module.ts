@@ -3,6 +3,7 @@ import { PdvService } from './pdv.service';
 import { PdvController } from './pdv.controller';
 import { MulterModule } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import { NewPdvService } from './new-pdv.service';
 
 @Module({
   imports: [
@@ -14,6 +15,6 @@ import { memoryStorage } from 'multer';
     }),
   ],
   controllers: [PdvController],
-  providers: [PdvService],
+  providers: [PdvService, NewPdvService],
 })
 export class PdvModule {}
