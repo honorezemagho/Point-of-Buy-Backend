@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -5,9 +6,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
-import { CreatePdvDto } from './dto/create-pdv.dto';
 import * as fs from 'fs';
-import path from 'path';
+import * as path from 'path';
 import { NewCreatePdvDto } from './dto/new-create-pdv.dto';
 
 @Injectable()
@@ -26,6 +26,29 @@ export class NewPdvService {
   }
 
   private transformRow(raw: any, idx: number): any {
+    const advertisingMaterials = [
+      'Frigo brandé',
+      'Table publicitaire',
+      'Set de tables brandés',
+      'Tenue de travail brandés',
+      'Signalétique extérieure',
+      'Affiches publicitaires',
+      'Chevalier brandé',
+      'Sous verres brandés',
+      'Sous tasses brandés',
+    ];
+
+    const advertisingMaterialPresent = this.collectMaterials(
+      raw,
+      'Elements de publicité présent',
+      advertisingMaterials,
+    );
+    const advertisingMaterialWished = this.collectMaterials(
+      raw,
+      'Elements de publicité souhaités',
+      advertisingMaterials,
+    );
+
     return {
       outlet_id: idx + 1,
       region: raw.REGION || null,
@@ -55,91 +78,111 @@ export class NewPdvService {
       nombre_chaise: raw['Nombre de chaise'] || null,
       service_offert: raw['Service offert'] || null,
       livraison_disponible: raw['Livraison disponible ?'] || null,
-      products: [
-        ...new Set(
-          [
-            ...Array.from(
-              { length: 11 },
-              (_, i) => raw[`Eau minerale disponible${i === 0 ? '' : i + 1}`],
-            ),
-            ...Array.from(
-              { length: 21 },
-              (_, i) =>
-                raw[`Boissons gazeuses présentes${i === 0 ? '' : i + 1}`],
-            ),
-            ...Array.from(
-              { length: 12 },
-              (_, i) =>
-                raw[`Boissons energisantes présentes${i === 0 ? '' : i + 1}`],
-            ),
-            ...Array.from(
-              { length: 25 },
-              (_, i) =>
-                raw[
-                  `Marques de boissons alcoolisées présentes${i === 0 ? '' : i + 1}`
-                ],
-            ),
-            ...Array.from(
-              { length: 10 },
-              (_, i) =>
-                raw[
-                  `Marques produits laitiers présents${i === 0 ? '' : i + 1}`
-                ],
-            ),
-            ...Array.from(
-              { length: 10 },
-              (_, i) =>
-                raw[`Marques culinaires présentes${i === 0 ? '' : i + 1}`],
-            ),
-            ...Array.from(
-              { length: 20 },
-              (_, i) =>
-                raw[
-                  `marques de pates alimentaires consommées${i === 0 ? '' : i + 1}`
-                ],
-            ),
-          ].filter(Boolean),
-        ),
-      ],
-      products_additionals: [
-        {
-          category: 'EAU_MINERALE',
-          source: raw['Source appro EAU'],
-          freq: raw['Frequence appro livraison directe EAU'],
-        },
-        {
-          category: 'BOISSONS_GAZEUSES',
-          source: raw["Lieu d'appro boissons gazeuses2"],
-          freq: raw['Frequence appro boissons gazeuses3'],
-        },
-        {
-          category: 'BOISSONS_ENERGISANTES',
-          source: raw['Appro Boissons energisantes'],
-          freq: raw['Frequence appro Boissons energisantes3'],
-        },
-        {
-          category: 'BOISSONS_ALCOOLISEES',
-          source: raw['Approvisionnement principal boissons alcoolisées'],
-          freq: raw['Freq appro grossistes'],
-        },
-        {
-          category: 'PRODUITS_LAITIERS',
-          source: raw['Lieu appro produits laitiers'],
-          freq: raw['Freq appro livraison directe produits laitiers'],
-        },
-        {
-          category: 'PRODUITS_CULINAIRES',
-          source: raw["Lieu d'appro produits culinaires"],
-          freq: raw['Freq appro culinaire livraison directe'],
-        },
-        {
-          category: 'PATES_ALIMENTAIRE',
-          source: raw['Appro pates alimentaires'],
-          freq: raw['Freq appro livraison directe pate alimentaire'],
-        },
-      ].filter((o) => o.source || o.freq),
-      advertising_materials: [],
+      products: this.extractProducts(raw),
+      products_additionals: this.extractProductAdditionals(raw),
+      advertising_material_present: advertisingMaterialPresent,
+      advertising_material_wished: advertisingMaterialWished,
     };
+  }
+
+  private collectMaterials(
+    raw: any,
+    baseField: string,
+    materials: string[],
+  ): string[] {
+    const collectedMaterials: string[] = [];
+    for (let i = 1; i <= 11; i++) {
+      const field = `${baseField}${i === 1 ? '' : i}`;
+      if (raw[field]) {
+        materials.forEach((material) => {
+          if (raw[field].includes(material)) {
+            collectedMaterials.push(material);
+          }
+        });
+      }
+    }
+    return collectedMaterials;
+  }
+
+  private extractProducts(raw: any): string[] {
+    const productFields = [
+      ...Array.from(
+        { length: 11 },
+        (_, i) => `Eau minerale disponible${i === 0 ? '' : i + 1}`,
+      ),
+      ...Array.from(
+        { length: 21 },
+        (_, i) => `Boissons gazeuses présentes${i === 0 ? '' : i + 1}`,
+      ),
+      ...Array.from(
+        { length: 12 },
+        (_, i) => `Boissons energisantes présentes${i === 0 ? '' : i + 1}`,
+      ),
+      ...Array.from(
+        { length: 25 },
+        (_, i) =>
+          `Marques de boissons alcoolisées présentes${i === 0 ? '' : i + 1}`,
+      ),
+      ...Array.from(
+        { length: 10 },
+        (_, i) => `Marques produits laitiers présents${i === 0 ? '' : i + 1}`,
+      ),
+      ...Array.from(
+        { length: 10 },
+        (_, i) => `Marques culinaires présentes${i === 0 ? '' : i + 1}`,
+      ),
+      ...Array.from(
+        { length: 20 },
+        (_, i) =>
+          `marques de pates alimentaires consommées${i === 1 ? '' : i + 1}`,
+      ),
+    ];
+
+    return productFields.map((field) => raw[field]).filter(Boolean);
+  }
+
+  private extractProductAdditionals(
+    raw: any,
+  ): { category: string; source: string; freq: string }[] {
+    const productAdditionals = [
+      {
+        category: 'EAU_MINERALE',
+        source: raw['Source appro EAU'],
+        freq: raw['Frequence appro livraison directe EAU'],
+      },
+      {
+        category: 'BOISSONS_GAZEUSES',
+        source: raw["Lieu d'appro boissons gazeuses2"],
+        freq: raw['Frequence appro boissons gazeuses3'],
+      },
+      {
+        category: 'BOISSONS_ENERGISANTES',
+        source: raw['Appro Boissons energisantes'],
+        freq: raw['Frequence appro Boissons energisantes3'],
+      },
+      {
+        category: 'BOISSONS_ALCOOLISEES',
+        source: raw['Approvisionnement principal boissons alcoolisées'],
+        freq: raw['Freq appro grossistes'],
+      },
+      {
+        category: 'PRODUITS_LAITIERS',
+        source: raw['Lieu appro produits laitiers'],
+        freq: raw['Freq appro livraison directe produits laitiers'],
+      },
+      {
+        category: 'PRODUITS_CULINAIRES',
+        source: raw["Lieu d'appro produits culinaires"],
+        freq: raw['Freq appro culinaire livraison directe'],
+      },
+      {
+        category: 'PATES_ALIMENTAIRE',
+        source: raw['Appro pates alimentaires'],
+        freq: raw['Freq appro livraison directe pate alimentaire'],
+      },
+    ];
+
+    return productAdditionals.filter((o) => o.source || o.freq);
   }
 
   private async validateDto(raw: any): Promise<boolean> {
