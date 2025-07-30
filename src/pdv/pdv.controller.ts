@@ -232,7 +232,9 @@ export class PdvController {
     }
 
     try {
-      const result = await this.newPdvService.processFirstFive(file.buffer);
+      const result = await this.newPdvService.processAndSaveToFirestore(
+        file.buffer,
+      );
 
       return {
         success: true,

@@ -6,8 +6,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
-import * as fs from 'fs';
-import * as path from 'path';
 import { Firestore } from 'firebase-admin/firestore';
 import { db } from '../firebase.config';
 import { NewCreatePdvDto } from './dto/new-create-pdv.dto';
@@ -15,15 +13,10 @@ import { NewCreatePdvDto } from './dto/new-create-pdv.dto';
 @Injectable()
 export class NewPdvService {
   private readonly logger = new Logger(NewPdvService.name);
-  private outputDir = './output'; // Specify the output directory
   private readonly collection = 'pdvs_data';
   private readonly db: Firestore = db;
 
-  constructor() {
-    if (!fs.existsSync(this.outputDir)) {
-      fs.mkdirSync(this.outputDir, { recursive: true });
-    }
-  }
+  constructor() {}
 
   private cleanPhone(str: string): string {
     return str ? str.replace(/\.0$/, '') : '';
@@ -56,7 +49,7 @@ export class NewPdvService {
     const menusProposes = this.collectMenus(raw);
 
     return {
-      outlet_id: idx + 1,
+      identifiant_enquete: this.generateOrderedId(idx + 1),
       region: raw.REGION || null,
       ville: raw.VILLE || null,
       arrondissement: raw.ARRONDISSEMENT || null,
@@ -218,6 +211,22 @@ export class NewPdvService {
     return productAdditionals.filter((o) => o.approv);
   }
 
+  private generateOrderedId(index: number) {
+    const now = new Date();
+    const pad = (n: number, len = 2) => String(n).padStart(len, '0');
+    const timestamp = [
+      now.getFullYear(),
+      pad(now.getMonth() + 1),
+      pad(now.getDate()),
+      pad(now.getHours()),
+      pad(now.getMinutes()),
+      pad(now.getSeconds()),
+      pad(now.getMilliseconds(), 3),
+    ].join('');
+    const indexStr = index.toString().padStart(5, '0');
+    return `${indexStr}_${timestamp}`;
+  }
+
   private async validateDto(raw: any): Promise<boolean> {
     const dto = plainToInstance(NewCreatePdvDto, raw, {
       enableImplicitConversion: true,
@@ -230,128 +239,93 @@ export class NewPdvService {
     return true;
   }
 
-  async processFirstFive(buffer: Buffer): Promise<string[]> {
-    const wb = XLSX.read(buffer, { type: 'buffer', cellText: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { raw: false, defval: '' });
-
-    const written: string[] = [];
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      if (!(await this.validateDto(row))) continue;
-      const json = this.transformRow(row, i);
-      const file = path.join(this.outputDir, `row${i + 1}.json`);
-      fs.writeFileSync(file, JSON.stringify(json, null, 2));
-      written.push(file);
-    }
-    return written;
-  }
-
   /**
-   * Reads all JSON files from the output directory and saves them to Firestore
-   * @returns Promise with the count of successfully saved documents
+   * Processes the Excel buffer and saves data to Firestore
+   * @param buffer Excel file buffer
+   * @returns Promise with the result of the operation
    */
-  async saveToFirestore(): Promise<{
-    success: number;
-    errors: Array<{ file: string; error: string }>;
+  async processAndSaveToFirestore(buffer: Buffer): Promise<{
+    success: boolean;
+    message: string;
+    details?: { errors: Array<{ index: number; error: string }> };
   }> {
     try {
-      // Read all JSON files from the output directory
-      const files = fs
-        .readdirSync(this.outputDir)
-        .filter((file: string) => file.endsWith('.json'))
-        .map((file: string) => path.join(this.outputDir, file));
+      // Parse Excel file
+      const wb = XLSX.read(buffer, { type: 'buffer', cellText: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      // Get all rows but only process first 10
+      const allRows = XLSX.utils.sheet_to_json(ws, { raw: false, defval: '' });
+      const rows = allRows.slice(0, 12); // Only take first 10 rows
 
-      if (files.length === 0) {
-        this.logger.warn('No JSON files found in the output directory');
-        return {
-          success: 0,
-          errors: [{ file: '', error: 'No JSON files found' }],
-        };
-      }
-
-      const batch = this.db.batch();
-      const errors: Array<{ file: string; error: string }> = [];
+      const errors: Array<{ index: number; error: string }> = [];
       let successCount = 0;
-      const BATCH_SIZE = 500;
-      let batchCount = 0;
+      const batch = this.db.batch();
 
-      for (const file of files) {
+      // Process each row
+      for (let i = 0; i < rows.length; i++) {
         try {
-          // Read and parse the JSON file
-          const fileContent = fs.readFileSync(file, 'utf-8');
-          const data = JSON.parse(fileContent);
+          const row = rows[i] as Record<string, unknown>;
 
-          // Use outlet_id as document ID or generate a new one
-          const docId = data.outlet_id?.toString();
-          const docRef = this.db
-            .collection(this.collection)
-            .doc(docId as string);
+          // Validate row data
+          if (!(await this.validateDto(row))) {
+            errors.push({ index: i, error: 'Validation failed' });
+            continue;
+          }
+
+          // Transform row to desired format
+          const data = this.transformRow(row, i);
+
+          // Use identifiant_enquete as document ID (ensure it's a number)
+          if (
+            data.identifiant_enquete === undefined ||
+            data.identifiant_enquete === null
+          ) {
+            errors.push({ index: i, error: 'Missing identifiant_enquete' });
+            continue;
+          }
+
+          // Ensure identifiant_enquete is a number
+          const docId = String(data.identifiant_enquete);
+          if (!docId) {
+            errors.push({
+              index: i,
+              error: 'Invalid identifiant_enquete',
+            });
+            continue;
+          }
+
+          const docRef = this.db.collection(this.collection).doc(docId);
 
           // Add to batch
           batch.set(docRef, data, { merge: true });
-          batchCount++;
-
-          // Commit batch if we reach batch size
-          if (batchCount >= BATCH_SIZE) {
-            await batch.commit();
-            successCount += batchCount;
-            batchCount = 0;
-          }
+          successCount++;
         } catch (error: unknown) {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
-          this.logger.error(`Error processing file ${file}:`, errorMessage);
+          this.logger.error(`Error processing row ${i}:`, errorMessage);
           errors.push({
-            file,
+            index: i,
             error: errorMessage,
           });
         }
       }
 
       // Commit any remaining operations in the batch
-      if (batchCount > 0) {
+      if (successCount > 0) {
         await batch.commit();
-        successCount += batchCount;
       }
 
-      this.logger.log(
-        `Successfully saved ${successCount} documents to Firestore`,
-      );
+      this.logger.log(`Successfully processed ${successCount} documents`);
 
       if (errors.length > 0) {
         this.logger.warn(
-          `Encountered ${errors.length} errors while processing files`,
+          `Encountered ${errors.length} errors while processing`,
         );
       }
 
       return {
-        success: successCount,
-        errors,
-      };
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      this.logger.error('Error in saveToFirestore:', errorMessage);
-      throw new Error(`Failed to save to Firestore: ${errorMessage}`);
-    }
-  }
-
-  /**
-   * Processes the output directory and saves all JSON files to Firestore
-   * @returns Promise with the result of the operation
-   */
-  async processAndSaveToFirestore(): Promise<{
-    success: boolean;
-    message: string;
-    details?: { errors: Array<{ file: string; error: string }> };
-  }> {
-    try {
-      const { success, errors } = await this.saveToFirestore();
-
-      return {
         success: errors.length === 0,
-        message: `Successfully processed ${success} files${errors.length > 0 ? ` with ${errors.length} errors` : ''}`,
+        message: `Successfully processed ${successCount} documents${errors.length > 0 ? ` with ${errors.length} errors` : ''}`,
         details: errors.length > 0 ? { errors } : undefined,
       };
     } catch (error: unknown) {
@@ -361,7 +335,7 @@ export class NewPdvService {
       return {
         success: false,
         message: 'Failed to process and save to Firestore',
-        details: { errors: [{ file: '', error: errorMessage }] },
+        details: { errors: [{ index: -1, error: errorMessage }] },
       };
     }
   }
