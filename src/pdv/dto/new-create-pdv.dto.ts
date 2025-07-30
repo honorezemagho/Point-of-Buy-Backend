@@ -82,12 +82,12 @@ export class NewCreatePdvDto {
 
   @ApiProperty({ example: 4.101857, description: 'Latitude of the PDV' })
   @IsOptional()
-  @IsLatitude()
+  // @IsLatitude()
   LATITUDE?: number;
 
   @ApiProperty({ example: 9.631957, description: 'Longitude of the PDV' })
   @IsOptional()
-  @IsLongitude()
+  // @IsLongitude()
   LONGITUDE?: number;
 
   @ApiProperty({ example: 'Gérant', description: 'Respondent of the PDV' })

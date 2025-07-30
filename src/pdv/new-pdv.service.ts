@@ -10,322 +10,328 @@ import { Firestore } from 'firebase-admin/firestore';
 import { db } from '../firebase.config';
 import { NewCreatePdvDto } from './dto/new-create-pdv.dto';
 
+interface RawPdvRow {
+  [key: string]: any;
+}
+
 @Injectable()
 export class NewPdvService {
   private readonly logger = new Logger(NewPdvService.name);
   private readonly collection = 'pdvs_data';
   private readonly db: Firestore = db;
 
+  // Firestore allows max 500 operations per batch; stay under limit
+  private readonly BATCH_SIZE = 450;
+
+  // Known advertising materials
+  private readonly ADVERTISING_MATERIALS = [
+    'Frigo brandé',
+    'Table publicitaire',
+    'Set de tables brandés',
+    'Tenue de travail brandés',
+    'Signalétique extérieure',
+    'Affiches publicitaires',
+    'Chevalier brandé',
+    'Sous verres brandés',
+    'Sous tasses brandés',
+  ];
+
   constructor() {}
-
-  private cleanPhone(str: string): string {
-    return str ? str.replace(/\.0$/, '') : '';
-  }
-
-  private transformRow(raw: any, idx: number): any {
-    const advertisingMaterials = [
-      'Frigo brandé',
-      'Table publicitaire',
-      'Set de tables brandés',
-      'Tenue de travail brandés',
-      'Signalétique extérieure',
-      'Affiches publicitaires',
-      'Chevalier brandé',
-      'Sous verres brandés',
-      'Sous tasses brandés',
-    ];
-
-    const advertisingMaterialPresent = this.collectMaterials(
-      raw,
-      'Elements de publicité présent',
-      advertisingMaterials,
-    );
-    const advertisingMaterialWished = this.collectMaterials(
-      raw,
-      'Elements de publicité souhaités',
-      advertisingMaterials,
-    );
-
-    const menusProposes = this.collectMenus(raw);
-
-    return {
-      identifiant_enquete: this.generateOrderedId(idx + 1),
-      region: raw.REGION || null,
-      ville: raw.VILLE || null,
-      arrondissement: raw.ARRONDISSEMENT || null,
-      quartier_final: raw['QUARTIER FINALE'] || null,
-      type_pdv_ok: raw['TYPE_PDV_OK'] || null,
-      zone_enquete: raw['ZONE_D_ENQUETE'] || null,
-      nom_entreprise: raw['NOM_ENTREPRISE'] || null,
-      chiffre_affaires: raw["Chiffre d'affaires"] || null,
-      raison_sociale: raw['Raison sociale'] || null,
-      creation: raw['Creation'] || null,
-      adresse_physique: raw['ADRESSE_PHYSIQUE'] || null,
-      nationalite_proprietaire: raw['Nationalité du propriétaire'] || null,
-      latitude: parseFloat(raw['LATITUDE']) || null,
-      longitude: parseFloat(raw['LONGITUDE']) || null,
-      repondant: raw['Repondant'] || null,
-      nom_repondant: raw['NOM_DU_REPONDANT'] || null,
-      tel_repondant: this.cleanPhone(raw['TELEPHONE_DU_REPONDANT']),
-      enseigne_visible: raw['Enseigne visible'] === 'Oui',
-      partenariat_publicitaire: raw['Partenariat publicitaire'] === 'Oui',
-      classement: raw['Classement'] || null,
-      nombre_chambre: raw['Nombre de chambre'] || null,
-      prix_chambre_std: raw['Prix standard chambre'] || null,
-      notation_hotel: raw['Q1_hotel_ok'] || null,
-      notation_restaurant: raw['Q1_restaurant_ok'] || null,
-      nombre_restaurant:
-        raw['Combien de restaurant dispose votre établissement ?'] || null,
-      nombre_chaise: raw['Nombre de chaise'] || null,
-      service_offert: raw['Service offert'] || null,
-      livraison_disponible: raw['Livraison disponible ?'] || null,
-      products: this.extractProducts(raw),
-      products_additionals: this.extractProductAdditionals(raw),
-      advertising_material_present: advertisingMaterialPresent,
-      advertising_material_wished: advertisingMaterialWished,
-      menus_proposes: menusProposes,
-    };
-  }
-
-  private collectMaterials(
-    raw: any,
-    baseField: string,
-    materials: string[],
-  ): string[] {
-    const collectedMaterials: string[] = [];
-    for (let i = 1; i <= 11; i++) {
-      const field = `${baseField}${i === 1 ? '' : i}`;
-      if (raw[field]) {
-        materials.forEach((material) => {
-          if (raw[field].includes(material)) {
-            collectedMaterials.push(material);
-          }
-        });
-      }
-    }
-    return collectedMaterials;
-  }
-
-  private collectMenus(raw: any): string[] {
-    const menus: string[] = [];
-    for (let i = 1; i <= 5; i++) {
-      const field = `Menu proposé${i === 1 ? '' : i}`;
-      if (raw[field]) {
-        menus.push(raw[field] as string);
-      }
-    }
-    return menus;
-  }
-
-  private extractProducts(raw: any): string[] {
-    const productFields = [
-      ...Array.from(
-        { length: 11 },
-        (_, i) => `Eau minerale disponible${i === 0 ? '' : i + 1}`,
-      ),
-      ...Array.from(
-        { length: 21 },
-        (_, i) => `Boissons gazeuses présentes${i === 0 ? '' : i + 1}`,
-      ),
-      ...Array.from(
-        { length: 12 },
-        (_, i) => `Boissons energisantes présentes${i === 0 ? '' : i + 1}`,
-      ),
-      ...Array.from(
-        { length: 10 },
-        (_, i) => `Marques produits laitiers présents${i === 0 ? '' : i + 1}`,
-      ),
-      ...Array.from(
-        { length: 10 },
-        (_, i) => `Marques culinaires présentes${i === 0 ? '' : i + 1}`,
-      ),
-      ...Array.from(
-        { length: 20 },
-        (_, i) =>
-          `marques de pates alimentaires consommées${i === 1 ? '' : i + 1}`,
-      ),
-      ...Array.from(
-        { length: 25 },
-        (_, i) =>
-          `Marques de boissons alcoolisées présentes${i === 0 ? '' : i + 1}`,
-      ),
-    ];
-
-    return productFields.map((field) => raw[field]).filter(Boolean);
-  }
-
-  private extractProductAdditionals(
-    raw: any,
-  ): { category: string; approv: string }[] {
-    const productAdditionals = [
-      {
-        category: 'EAU_MINERALE',
-        approv: raw['Approvisionnement en eau au cours du dernier mois'],
-        // source: raw['Source appro EAU'],
-        // freq: raw['Frequence appro livraison directe EAU'],
-      },
-      {
-        category: 'BOISSONS_GAZEUSES',
-        approv: raw['Appro Boissons gazeuses au cours du mois'],
-        // source: raw["Lieu d'appro boissons gazeuses2"],
-        // freq: raw['Frequence appro boissons gazeuses3'],
-      },
-      {
-        category: 'BOISSONS_ENERGISANTES',
-        approv: raw['Boissons energisantes disponibles ?'],
-        // source: raw['Appro Boissons energisantes'],
-        // freq: raw['Frequence appro Boissons energisantes3'],
-      },
-      {
-        category: 'PRODUITS_LAITIERS',
-        approv: raw['Appro en Produits laitiers au cours du dernier mois ?'],
-        // source: raw['Lieu appro produits laitiers'],
-        // freq: raw['Freq appro livraison directe produits laitiers'],
-      },
-      {
-        category: 'PRODUITS_CULINAIRES',
-        approv: raw['Produits culinaires'],
-        // source: raw["Lieu d'appro produits culinaires"],
-        // freq: raw['Freq appro culinaire livraison directe'],
-      },
-      {
-        category: 'PATES_ALIMENTAIRE',
-        approv: raw['Pates alimentaires?'],
-        // source: raw['Appro pates alimentaires'],
-        // freq: raw['Freq appro livraison directe pate alimentaire'],
-      },
-      // {
-      //   category: 'HUILE_DE_CUISON',
-      //   source: raw['Approvisionnement principal boissons alcoolisées'],
-      //   freq: raw['Lieu appro huiles de cuisson'],
-      //   approv: raw['Huiles de cuisson?'],
-      // },
-      {
-        category: 'BOISSONS_ALCOOLISEES',
-        approv: raw['Boissons alcoolisées ?'],
-        // source: raw['Approvisionnement principal boissons alcoolisées'],
-        // freq: raw['Freq appro grossistes'],
-      },
-    ];
-
-    return productAdditionals.filter((o) => o.approv);
-  }
-
-  private generateOrderedId(index: number) {
-    const indexStr = index.toString().padStart(5, '0');
-    return `${indexStr}`;
-  }
-
-  private async validateDto(raw: any): Promise<boolean> {
-    const dto = plainToInstance(NewCreatePdvDto, raw, {
-      enableImplicitConversion: true,
-    });
-    const errors = await validate(dto);
-    if (errors.length) {
-      this.logger.warn(`Validation failed: ${JSON.stringify(errors)}`);
-      return false;
-    }
-    return true;
-  }
 
   /**
    * Processes the Excel buffer and saves data to Firestore
-   * @param buffer Excel file buffer
-   * @returns Promise with the result of the operation
+   * Uses batching and robust error handling for large datasets
    */
   async processAndSaveToFirestore(buffer: Buffer): Promise<{
     success: boolean;
     message: string;
     details?: { errors: Array<{ index: number; error: string }> };
   }> {
+    let rows: RawPdvRow[];
+
+    // Parse Excel
     try {
-      // Parse Excel file
       const wb = XLSX.read(buffer, { type: 'buffer', cellText: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      // Get all rows but only process first 10
-      const allRows = XLSX.utils.sheet_to_json(ws, { raw: false, defval: '' });
-      const rows = allRows.slice(0, 12); // Only take first 10 rows
+      rows = XLSX.utils.sheet_to_json(ws, { raw: false, defval: '' });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Excel parsing failed';
+      this.logger.error('Failed to parse Excel file:', message);
+      return {
+        success: false,
+        message: 'Failed to parse Excel file',
+        details: { errors: [{ index: -1, error: message }] },
+      };
+    }
 
-      const errors: Array<{ index: number; error: string }> = [];
-      let successCount = 0;
+    this.logger.log(`Starting processing of ${rows.length} records`);
+
+    const errors: { index: number; error: string }[] = [];
+
+    // Process in batches
+    for (let i = 0; i < rows.length; i += this.BATCH_SIZE) {
       const batch = this.db.batch();
+      let writeCount = 0; // ✅ Manually track writes (instead of _getWriteCount)
 
-      // Process each row
-      for (let i = 0; i < rows.length; i++) {
+      const batchRows = rows.slice(i, i + this.BATCH_SIZE);
+      const promises = batchRows.map(async (row, localIndex) => {
+        const globalIndex = i + localIndex;
+
         try {
-          const row = rows[i] as Record<string, unknown>;
+          // Transform row
+          const data = this.transformRow(row, globalIndex);
 
-          // Validate row data
-          if (!(await this.validateDto(row))) {
-            errors.push({ index: i, error: 'Validation failed' });
-            continue;
+          // Validate DTO
+          const dto = plainToInstance(NewCreatePdvDto, data, {
+            enableImplicitConversion: true,
+          });
+          const validationErrors = await validate(dto, {
+            skipMissingProperties: true,
+          });
+
+          if (validationErrors.length > 0) {
+            const errMsg = validationErrors
+              .map((e) => Object.values(e.constraints || {}).join(', '))
+              .join('; ');
+            throw new Error(`Validation failed: ${errMsg}`);
           }
 
-          // Transform row to desired format
-          const data = this.transformRow(row, i);
-
-          // Use identifiant_enquete as document ID (ensure it's a number)
-          if (
-            data.identifiant_enquete === undefined ||
-            data.identifiant_enquete === null
-          ) {
-            errors.push({ index: i, error: 'Missing identifiant_enquete' });
-            continue;
-          }
-
-          // Ensure identifiant_enquete is a number
+          // Ensure valid document ID
           const docId = String(data.identifiant_enquete);
-          if (!docId) {
-            errors.push({
-              index: i,
-              error: 'Invalid identifiant_enquete',
-            });
-            continue;
+          if (!docId || docId === 'null' || docId === 'undefined') {
+            throw new Error('Invalid or missing document ID');
           }
 
           const docRef = this.db.collection(this.collection).doc(docId);
-
-          // Add to batch
           batch.set(docRef, data, { merge: true });
-          successCount++;
+          writeCount++;
         } catch (error: unknown) {
-          const errorMessage =
+          const message =
             error instanceof Error ? error.message : String(error);
-          this.logger.error(`Error processing row ${i}:`, errorMessage);
-          errors.push({
-            index: i,
-            error: errorMessage,
+          errors.push({ index: globalIndex, error: message });
+        }
+      });
+
+      // Wait for all transformations and validations in this batch
+      await Promise.all(promises);
+
+      // Commit batch only if there are writes
+      if (writeCount > 0) {
+        try {
+          await batch.commit();
+          this.logger.debug(
+            `Committed batch: ${i / this.BATCH_SIZE + 1}, writes: ${writeCount}`,
+          );
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error ? error.message : 'Batch commit failed';
+          // Attribute failure to all items in batch (best effort)
+          batchRows.forEach((_, localIndex) => {
+            const globalIndex = i + localIndex;
+            errors.push({
+              index: globalIndex,
+              error: `Batch commit failed: ${message}`,
+            });
           });
         }
       }
-
-      // Commit any remaining operations in the batch
-      if (successCount > 0) {
-        await batch.commit();
-      }
-
-      this.logger.log(`Successfully processed ${successCount} documents`);
-
-      if (errors.length > 0) {
-        this.logger.warn(
-          `Encountered ${errors.length} errors while processing`,
-        );
-      }
-
-      return {
-        success: errors.length === 0,
-        message: `Successfully processed ${successCount} documents${errors.length > 0 ? ` with ${errors.length} errors` : ''}`,
-        details: errors.length > 0 ? { errors } : undefined,
-      };
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      this.logger.error('Error in processAndSaveToFirestore:', errorMessage);
-      return {
-        success: false,
-        message: 'Failed to process and save to Firestore',
-        details: { errors: [{ index: -1, error: errorMessage }] },
-      };
     }
+
+    const successCount = rows.length - errors.length;
+    const success = errors.length === 0;
+
+    this.logger.log(
+      `Processing completed: ${successCount} success, ${errors.length} errors`,
+    );
+    return {
+      success,
+      message: `Processed ${rows.length} records: ${successCount} succeeded${errors.length ? `, ${errors.length} failed` : ''}`,
+      details: errors.length ? { errors } : undefined,
+    };
+  }
+
+  /**
+   * Transforms a raw Excel row into structured data
+   */
+  private transformRow(raw: RawPdvRow, idx: number): any {
+    return {
+      identifiant_enquete: this.generateOrderedId(idx + 1),
+      region: this.safeString(raw.REGION),
+      ville: this.safeString(raw.VILLE),
+      arrondissement: this.safeString(raw.ARRONDISSEMENT),
+      quartier_final: this.safeString(raw['QUARTIER FINALE']),
+      type_pdv_ok: this.safeString(raw['TYPE_PDV_OK']),
+      zone_enquete: this.safeString(raw['ZONE_D_ENQUETE']),
+      nom_entreprise: this.safeString(raw['NOM_ENTREPRISE']),
+      chiffre_affaires: this.safeString(raw["Chiffre d'affaires"]),
+      raison_sociale: this.safeString(raw['Raison sociale']),
+      creation: this.safeString(raw['Creation']),
+      adresse_physique: this.safeString(raw['ADRESSE_PHYSIQUE']),
+      nationalite_proprietaire: this.safeString(
+        raw['Nationalité du propriétaire'],
+      ),
+      latitude: this.safeFloat(raw['LATITUDE']),
+      longitude: this.safeFloat(raw['LONGITUDE']),
+      repondant: this.safeString(raw['Repondant']),
+      nom_repondant: this.safeString(raw['NOM_DU_REPONDANT']),
+      tel_repondant: this.cleanPhone(raw['TELEPHONE_DU_REPONDANT']),
+      enseigne_visible: raw['Enseigne visible'] === 'Oui',
+      partenariat_publicitaire: raw['Partenariat publicitaire'] === 'Oui',
+      classement: this.safeString(raw['Classement']),
+      nombre_chambre: this.safeNumber(raw['Nombre de chambre']),
+      prix_chambre_std: this.safeFloat(raw['Prix standard chambre']),
+      notation_hotel: this.safeString(raw['Q1_hotel_ok']),
+      notation_restaurant: this.safeString(raw['Q1_restaurant_ok']),
+      nombre_restaurant: this.safeNumber(
+        raw['Combien de restaurant dispose votre établissement ?'],
+      ),
+      nombre_chaise: this.safeNumber(raw['Nombre de chaise']),
+      service_offert: this.safeString(raw['Service offert']),
+      livraison_disponible: this.safeString(raw['Livraison disponible ?']),
+      products: this.extractProducts(raw),
+      products_additionals: this.extractProductAdditionals(raw),
+      advertising_material_present: this.collectMaterials(
+        raw,
+        'Elements de publicité présent',
+      ),
+      advertising_material_wished: this.collectMaterials(
+        raw,
+        'Elements de publicité souhaités',
+      ),
+      menus_proposes: this.collectMenus(raw),
+    };
+  }
+
+  /**
+   * Extract advertising materials from "Elements de publicité présent", "présent2", etc.
+   */
+  private collectMaterials(raw: RawPdvRow, baseField: string): string[] {
+    const result: string[] = [];
+    for (let i = 1; i <= 11; i++) {
+      const field = `${baseField}${i === 1 ? '' : i}`;
+      const value = raw[field];
+      if (typeof value === 'string') {
+        this.ADVERTISING_MATERIALS.forEach((material) => {
+          if (value.includes(material) && !result.includes(material)) {
+            result.push(material);
+          }
+        });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Extract menus (Menu proposé, Menu proposé2, ...)
+   */
+  private collectMenus(raw: RawPdvRow): string[] {
+    const menus: string[] = [];
+    for (let i = 1; i <= 5; i++) {
+      const field = `Menu proposé${i === 1 ? '' : i}`;
+      const value = raw[field];
+      if (value) menus.push(String(value).trim());
+    }
+    return menus;
+  }
+
+  /**
+   * Extract all product fields
+   */
+  private extractProducts(raw: RawPdvRow): string[] {
+    const prefixes = [
+      { prefix: 'Eau minerale disponible', count: 11 },
+      { prefix: 'Boissons gazeuses présentes', count: 21 },
+      { prefix: 'Boissons energisantes présentes', count: 12 },
+      { prefix: 'Marques produits laitiers présents', count: 10 },
+      { prefix: 'Marques culinaires présentes', count: 10 },
+      { prefix: 'marques de pates alimentaires consommées', count: 20 },
+      { prefix: 'Marques de boissons alcoolisées présentes', count: 25 },
+    ];
+
+    const values: string[] = [];
+    for (const { prefix, count } of prefixes) {
+      for (let i = 1; i <= count; i++) {
+        const field = `${prefix}${i === 1 ? '' : i}`;
+        const value = raw[field];
+        if (value) values.push(String(value).trim());
+      }
+    }
+    return values;
+  }
+
+  /**
+   * Extract product availability/additional info
+   */
+  private extractProductAdditionals(
+    raw: RawPdvRow,
+  ): { category: string; approv: string }[] {
+    const mappings = [
+      {
+        category: 'EAU_MINERALE',
+        field: 'Approvisionnement en eau au cours du dernier mois',
+      },
+      {
+        category: 'BOISSONS_GAZEUSES',
+        field: 'Appro Boissons gazeuses au cours du mois',
+      },
+      {
+        category: 'BOISSONS_ENERGISANTES',
+        field: 'Boissons energisantes disponibles ?',
+      },
+      {
+        category: 'PRODUITS_LAITIERS',
+        field: 'Appro en Produits laitiers au cours du dernier mois ?',
+      },
+      { category: 'PRODUITS_CULINAIRES', field: 'Produits culinaires' },
+      { category: 'PATES_ALIMENTAIRE', field: 'Pates alimentaires?' },
+      { category: 'BOISSONS_ALCOOLISEES', field: 'Boissons alcoolisées ?' },
+    ];
+
+    return mappings
+      .map(({ category, field }) => {
+        const approv = raw[field];
+        return approv ? { category, approv: String(approv).trim() } : null;
+      })
+      .filter(
+        (item): item is { category: string; approv: string } => item !== null,
+      );
+  }
+
+  /**
+   * Generate 5-digit padded ID
+   */
+  private generateOrderedId(index: number): string {
+    return index.toString().padStart(5, '0');
+  }
+
+  /**
+   * Clean phone number (remove trailing ".0")
+   */
+  private cleanPhone(str: any): string | null {
+    if (typeof str !== 'string') return null;
+    return str.replace(/\.0$/, '').trim() || null;
+  }
+
+  /**
+   * Safely convert to string
+   */
+  private safeString(val: any): string | null {
+    return val == null || val === '' ? null : String(val).trim();
+  }
+
+  /**
+   * Safely convert to number
+   */
+  private safeNumber(val: any): number | null {
+    const n = Number(val);
+    return isNaN(n) || val == null ? null : n;
+  }
+
+  /**
+   * Safely convert to float
+   */
+  private safeFloat(val: any): number | null {
+    return this.safeNumber(val);
   }
 }
