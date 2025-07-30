@@ -49,6 +49,8 @@ export class NewPdvService {
       advertisingMaterials,
     );
 
+    const menusProposes = this.collectMenus(raw);
+
     return {
       outlet_id: idx + 1,
       region: raw.REGION || null,
@@ -73,6 +75,8 @@ export class NewPdvService {
       classement: raw['Classement'] || null,
       nombre_chambre: raw['Nombre de chambre'] || null,
       prix_chambre_std: raw['Prix standard chambre'] || null,
+      notation_hotel: raw['Q1_hotel_ok'] || null,
+      notation_restaurant: raw['Q1_restaurant_ok'] || null,
       nombre_restaurant:
         raw['Combien de restaurant dispose votre établissement ?'] || null,
       nombre_chaise: raw['Nombre de chaise'] || null,
@@ -82,6 +86,7 @@ export class NewPdvService {
       products_additionals: this.extractProductAdditionals(raw),
       advertising_material_present: advertisingMaterialPresent,
       advertising_material_wished: advertisingMaterialWished,
+      menus_proposes: menusProposes,
     };
   }
 
@@ -104,6 +109,17 @@ export class NewPdvService {
     return collectedMaterials;
   }
 
+  private collectMenus(raw: any): string[] {
+    const menus: string[] = [];
+    for (let i = 1; i <= 5; i++) {
+      const field = `Menu proposé${i === 1 ? '' : i}`;
+      if (raw[field]) {
+        menus.push(raw[field] as string);
+      }
+    }
+    return menus;
+  }
+
   private extractProducts(raw: any): string[] {
     const productFields = [
       ...Array.from(
@@ -119,11 +135,6 @@ export class NewPdvService {
         (_, i) => `Boissons energisantes présentes${i === 0 ? '' : i + 1}`,
       ),
       ...Array.from(
-        { length: 25 },
-        (_, i) =>
-          `Marques de boissons alcoolisées présentes${i === 0 ? '' : i + 1}`,
-      ),
-      ...Array.from(
         { length: 10 },
         (_, i) => `Marques produits laitiers présents${i === 0 ? '' : i + 1}`,
       ),
@@ -136,6 +147,11 @@ export class NewPdvService {
         (_, i) =>
           `marques de pates alimentaires consommées${i === 1 ? '' : i + 1}`,
       ),
+      ...Array.from(
+        { length: 25 },
+        (_, i) =>
+          `Marques de boissons alcoolisées présentes${i === 0 ? '' : i + 1}`,
+      ),
     ];
 
     return productFields.map((field) => raw[field]).filter(Boolean);
@@ -143,46 +159,59 @@ export class NewPdvService {
 
   private extractProductAdditionals(
     raw: any,
-  ): { category: string; source: string; freq: string }[] {
+  ): { category: string; approv: string }[] {
     const productAdditionals = [
       {
         category: 'EAU_MINERALE',
-        source: raw['Source appro EAU'],
-        freq: raw['Frequence appro livraison directe EAU'],
+        approv: raw['Approvisionnement en eau au cours du dernier mois'],
+        // source: raw['Source appro EAU'],
+        // freq: raw['Frequence appro livraison directe EAU'],
       },
       {
         category: 'BOISSONS_GAZEUSES',
-        source: raw["Lieu d'appro boissons gazeuses2"],
-        freq: raw['Frequence appro boissons gazeuses3'],
+        approv: raw['Appro Boissons gazeuses au cours du mois'],
+        // source: raw["Lieu d'appro boissons gazeuses2"],
+        // freq: raw['Frequence appro boissons gazeuses3'],
       },
       {
         category: 'BOISSONS_ENERGISANTES',
-        source: raw['Appro Boissons energisantes'],
-        freq: raw['Frequence appro Boissons energisantes3'],
-      },
-      {
-        category: 'BOISSONS_ALCOOLISEES',
-        source: raw['Approvisionnement principal boissons alcoolisées'],
-        freq: raw['Freq appro grossistes'],
+        approv: raw['Boissons energisantes disponibles ?'],
+        // source: raw['Appro Boissons energisantes'],
+        // freq: raw['Frequence appro Boissons energisantes3'],
       },
       {
         category: 'PRODUITS_LAITIERS',
-        source: raw['Lieu appro produits laitiers'],
-        freq: raw['Freq appro livraison directe produits laitiers'],
+        approv: raw['Appro en Produits laitiers au cours du dernier mois ?'],
+        // source: raw['Lieu appro produits laitiers'],
+        // freq: raw['Freq appro livraison directe produits laitiers'],
       },
       {
         category: 'PRODUITS_CULINAIRES',
-        source: raw["Lieu d'appro produits culinaires"],
-        freq: raw['Freq appro culinaire livraison directe'],
+        approv: raw['Produits culinaires'],
+        // source: raw["Lieu d'appro produits culinaires"],
+        // freq: raw['Freq appro culinaire livraison directe'],
       },
       {
         category: 'PATES_ALIMENTAIRE',
-        source: raw['Appro pates alimentaires'],
-        freq: raw['Freq appro livraison directe pate alimentaire'],
+        approv: raw['Pates alimentaires?'],
+        // source: raw['Appro pates alimentaires'],
+        // freq: raw['Freq appro livraison directe pate alimentaire'],
+      },
+      // {
+      //   category: 'HUILE_DE_CUISON',
+      //   source: raw['Approvisionnement principal boissons alcoolisées'],
+      //   freq: raw['Lieu appro huiles de cuisson'],
+      //   approv: raw['Huiles de cuisson?'],
+      // },
+      {
+        category: 'BOISSONS_ALCOOLISEES',
+        approv: raw['Boissons alcoolisées ?'],
+        // source: raw['Approvisionnement principal boissons alcoolisées'],
+        // freq: raw['Freq appro grossistes'],
       },
     ];
 
-    return productAdditionals.filter((o) => o.source || o.freq);
+    return productAdditionals.filter((o) => o.approv);
   }
 
   private async validateDto(raw: any): Promise<boolean> {
