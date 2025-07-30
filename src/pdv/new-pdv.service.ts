@@ -8,12 +8,16 @@ import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Firestore } from 'firebase-admin/firestore';
+import { db } from '../firebase.config';
 import { NewCreatePdvDto } from './dto/new-create-pdv.dto';
 
 @Injectable()
 export class NewPdvService {
   private readonly logger = new Logger(NewPdvService.name);
   private outputDir = './output'; // Specify the output directory
+  private readonly collection = 'pdvs_data';
+  private readonly db: Firestore = db;
 
   constructor() {
     if (!fs.existsSync(this.outputDir)) {
@@ -241,5 +245,124 @@ export class NewPdvService {
       written.push(file);
     }
     return written;
+  }
+
+  /**
+   * Reads all JSON files from the output directory and saves them to Firestore
+   * @returns Promise with the count of successfully saved documents
+   */
+  async saveToFirestore(): Promise<{
+    success: number;
+    errors: Array<{ file: string; error: string }>;
+  }> {
+    try {
+      // Read all JSON files from the output directory
+      const files = fs
+        .readdirSync(this.outputDir)
+        .filter((file: string) => file.endsWith('.json'))
+        .map((file: string) => path.join(this.outputDir, file));
+
+      if (files.length === 0) {
+        this.logger.warn('No JSON files found in the output directory');
+        return {
+          success: 0,
+          errors: [{ file: '', error: 'No JSON files found' }],
+        };
+      }
+
+      const batch = this.db.batch();
+      const errors: Array<{ file: string; error: string }> = [];
+      let successCount = 0;
+      const BATCH_SIZE = 500;
+      let batchCount = 0;
+
+      for (const file of files) {
+        try {
+          // Read and parse the JSON file
+          const fileContent = fs.readFileSync(file, 'utf-8');
+          const data = JSON.parse(fileContent);
+
+          // Use outlet_id as document ID or generate a new one
+          const docId = data.outlet_id?.toString();
+          const docRef = this.db
+            .collection(this.collection)
+            .doc(docId as string);
+
+          // Add to batch
+          batch.set(docRef, data, { merge: true });
+          batchCount++;
+
+          // Commit batch if we reach batch size
+          if (batchCount >= BATCH_SIZE) {
+            await batch.commit();
+            successCount += batchCount;
+            batchCount = 0;
+          }
+        } catch (error: unknown) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          this.logger.error(`Error processing file ${file}:`, errorMessage);
+          errors.push({
+            file,
+            error: errorMessage,
+          });
+        }
+      }
+
+      // Commit any remaining operations in the batch
+      if (batchCount > 0) {
+        await batch.commit();
+        successCount += batchCount;
+      }
+
+      this.logger.log(
+        `Successfully saved ${successCount} documents to Firestore`,
+      );
+
+      if (errors.length > 0) {
+        this.logger.warn(
+          `Encountered ${errors.length} errors while processing files`,
+        );
+      }
+
+      return {
+        success: successCount,
+        errors,
+      };
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error('Error in saveToFirestore:', errorMessage);
+      throw new Error(`Failed to save to Firestore: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Processes the output directory and saves all JSON files to Firestore
+   * @returns Promise with the result of the operation
+   */
+  async processAndSaveToFirestore(): Promise<{
+    success: boolean;
+    message: string;
+    details?: { errors: Array<{ file: string; error: string }> };
+  }> {
+    try {
+      const { success, errors } = await this.saveToFirestore();
+
+      return {
+        success: errors.length === 0,
+        message: `Successfully processed ${success} files${errors.length > 0 ? ` with ${errors.length} errors` : ''}`,
+        details: errors.length > 0 ? { errors } : undefined,
+      };
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error('Error in processAndSaveToFirestore:', errorMessage);
+      return {
+        success: false,
+        message: 'Failed to process and save to Firestore',
+        details: { errors: [{ file: '', error: errorMessage }] },
+      };
+    }
   }
 }
