@@ -212,19 +212,8 @@ export class NewPdvService {
   }
 
   private generateOrderedId(index: number) {
-    const now = new Date();
-    const pad = (n: number, len = 2) => String(n).padStart(len, '0');
-    const timestamp = [
-      now.getFullYear(),
-      pad(now.getMonth() + 1),
-      pad(now.getDate()),
-      pad(now.getHours()),
-      pad(now.getMinutes()),
-      pad(now.getSeconds()),
-      pad(now.getMilliseconds(), 3),
-    ].join('');
     const indexStr = index.toString().padStart(5, '0');
-    return `${indexStr}_${timestamp}`;
+    return `${indexStr}`;
   }
 
   private async validateDto(raw: any): Promise<boolean> {
